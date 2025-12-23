@@ -1,0 +1,18 @@
+﻿# 基础Web框架（适配Python3.8）
+streamlit==1.28.2
+# HTTP请求库（稳定兼容3.8）
+requests==2.28.2
+# HTML解析库（经典稳定版）
+beautifulsoup4==4.11.2
+# 中文分词库（适配3.8，无兼容问题）
+jieba==0.42.1
+# 数据可视化（pyecharts核心，适配3.8）
+pyecharts==2.0.3
+# streamlit集成pyecharts（适配pyecharts2.x和streamlit1.x）
+streamlit-echarts==0.4.0
+# 数据展示（兼容Python3.8的最后几个稳定版）
+pandas==1.5.3
+# 正则、collections、warnings为Python内置库，无需额外安装
+
+
+pyarrow==12.0.0

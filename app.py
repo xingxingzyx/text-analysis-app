@@ -1,206 +1,149 @@
-﻿# -*- coding: utf-8 -*-
 import streamlit as st
+from streamlit_echarts import st_pyecharts
 import requests
 from bs4 import BeautifulSoup
 import jieba
-import re
 from collections import Counter
-from pyecharts import options as opts
-from pyecharts.charts import WordCloud, Bar, Line, Pie, Radar, Scatter, Bar3D, Line3D
-from streamlit_echarts import st_pyecharts
+import re
 import warnings
-warnings.filterwarnings("ignore")
+warnings.filterwarnings('ignore')
 
-# -------------------------- 页面基础设置 --------------------------
-st.set_page_config(
-    page_title="文本词频分析工具",
-    layout="wide",  # 宽屏布局
-    initial_sidebar_state="expanded"  # 侧边栏默认展开
-)
-
-# -------------------------- 内置停用词表（过滤无意义词汇） --------------------------
-STOP_WORDS = {
-    "的", "了", "是", "我", "你", "他", "她", "它", "们", "在", "有", "就", "不", "和", "也", "都", "这",
-    "那", "其", "及", "与", "或", "但", "如果", "因为", "所以", "之", "于", "而", "则", "着", "过", "会",
-    "要", "能", "可", "将", "对", "对于", "关于", "为", "为了", "以", "凭", "靠", "用", "通过", "就", "才",
-    "还", "又", "更", "最", "很", "非常", "稍微", "比较", "一点", "一些", "个", "本", "该", "每", "各",
-    "几", "多少", "谁", "什么", "哪里", "何时", "如何", "为什么", "啊", "呀", "呢", "吧", "吗", "哦", "嗯",
-    "哈", "哎", "喂", "呃", "唔", "这", "里", "那", "里", "上", "下", "左", "右", "前", "后", "中", "间",
-    "到", "从", "向", "往", "朝", "沿", "顺", "逆", "随", "跟", "同", "比", "比", "如", "像", "似", "若"
-}
-
-# -------------------------- 文本清洗与分词函数 --------------------------
-def clean_and_cut_text(raw_text):
-    """
-    清洗文本（去HTML标签、标点、多余空格）+ 分词 + 过滤停用词/单字
-    """
-    # 1. 去除HTML标签
-    text = re.sub(r'<[^>]+>', '', raw_text)
-    # 2. 去除标点符号、特殊字符（保留中文）
-    text = re.sub(r'[^\u4e00-\u9fa5\s]', '', text)
-    # 3. 去除多余空格和换行
-    text = re.sub(r'\s+', ' ', text).strip()
-    # 4. jieba分词
-    words = jieba.lcut(text)
-    # 5. 过滤：停用词、单字、空字符串
-    valid_words = [
-        word for word in words 
-        if word not in STOP_WORDS and len(word) > 1 and word.strip() != ""
-    ]
-    return valid_words
-
-# -------------------------- URL文本抓取函数 --------------------------
+# -------------------------- 工具函数 --------------------------
 def crawl_url_text(url):
-    """
-    抓取URL对应的网页文本内容
-    """
+    """抓取URL的文本内容"""
     try:
-        # 请求头（模拟浏览器，避免被反爬）
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36'
         }
-        # 发送请求（超时10秒）
         response = requests.get(url, headers=headers, timeout=10)
-        response.raise_for_status()  # 抛出HTTP错误（如404、500）
-        response.encoding = response.apparent_encoding  # 自动识别编码
-        # 解析文本（提取p/h1-h6标签的文本，覆盖大部分文章内容）
+        response.encoding = response.apparent_encoding or 'utf-8'
         soup = BeautifulSoup(response.text, 'html.parser')
-        text_parts = []
-        # 提取标题
-        for h in soup.find_all(['h1', 'h2', 'h3']):
-            text_parts.append(h.get_text().strip())
-        # 提取正文
-        for p in soup.find_all('p'):
-            text_parts.append(p.get_text().strip())
-        # 拼接文本
-        full_text = " ".join(text_parts)
-        if not full_text:
-            st.error("URL页面未提取到有效文本！")
+        
+        # 移除script、style、nav、footer等非正文标签
+        for tag in soup(['script', 'style', 'nav', 'footer', 'header', 'iframe', 'aside']):
+            tag.decompose()
+        
+        # 提取正文（优先取article、div[class*="content"]、p标签）
+        article = soup.find('article')
+        if article:
+            text = article.get_text(strip=True, separator='\n')
+        else:
+            content_div = soup.find('div', class_=re.compile(r'content|article|main', re.I))
+            if content_div:
+                text = content_div.get_text(strip=True, separator='\n')
+            else:
+                # 提取所有p标签文本
+                p_tags = soup.find_all('p')
+                text = '\n'.join([p.get_text(strip=True) for p in p_tags if p.get_text(strip=True)])
+        
+        # 过滤空文本
+        if not text or len(text) < 50:
+            st.error("未能提取到有效文本（可能是反爬或页面结构不支持）！")
             return ""
-        return full_text
-    except requests.exceptions.RequestException as e:
+        
+        return text
+    except Exception as e:
         st.error(f"URL抓取失败：{str(e)}")
         return ""
 
-# -------------------------- 图表生成函数 --------------------------
+def clean_and_cut_text(text):
+    """清洗文本并分词"""
+    # 1. 清洗：只保留中文、英文、数字，移除特殊字符
+    text = re.sub(r'[^\u4e00-\u9fa5a-zA-Z0-9\s]', '', text)
+    text = re.sub(r'\s+', ' ', text).strip()
+    
+    # 2. 分词
+    words = jieba.lcut(text)
+    
+    # 3. 过滤停用词和无效词汇（单字、空白）
+    stop_words = set([
+        '的', '了', '是', '在', '有', '和', '就', '不', '人', '我', '到', '来', '去', '上', '下', '大', '小',
+        '多', '少', '一', '二', '三', '四', '五', '六', '七', '八', '九', '十', '百', '千', '万', '亿',
+        '这', '那', '哪', '此', '彼', '其', '它', '他', '她', '你', '我', '他', '我们', '你们', '他们',
+        '这里', '那里', '哪里', '什么', '怎么', '为什么', '因为', '所以', '但是', '而且', '虽然', '如果',
+        '对于', '关于', '一定', '可能', '可以', '应该', '需要', '会', '要', '没', '没有', '还', '也', '都',
+        '只', '只', '又', '再', '更', '最', '很', '非常', '特别', '比较', '稍微', '几乎', '差不多',
+        '着', '过', '过', '呢', '吗', '吧', '啊', '呀', '哦', '嗯', '哈', '哼', '呵',
+        'http', 'https', 'com', 'www', 'html', 'php', 'jsp', 'asp', 'css', 'js', 'img', 'src', 'href'
+    ])
+    
+    valid_words = [
+        word for word in words 
+        if len(word) > 1  # 过滤单字
+        and word not in stop_words  # 过滤停用词
+        and not word.isdigit()  # 过滤纯数字
+        and len(word.strip()) > 0  # 过滤空白
+    ]
+    
+    return valid_words
+
 def generate_chart(chart_type, top20_words):
-    """
-    根据选择的图表类型生成对应的pyecharts图表
-    """
+    """生成可视化图表"""
     words = [item[0] for item in top20_words]
     counts = [item[1] for item in top20_words]
     
-    if chart_type == "词云":
-        # 词云图
-        wc = (
-            WordCloud()
-            .add("", list(zip(words, counts)), word_size_range=[20, 100])
-            .set_global_opts(title_opts=opts.TitleOpts(title="词汇词云图", subtitle="词频越高，字体越大"))
-        )
-        return wc
+    from pyecharts import options as opts
+    from pyecharts.charts import Bar, Line, WordCloud, Pie
     
-    elif chart_type == "词频柱状图":
-        # 柱状图
-        bar = (
+    if chart_type == "柱状图":
+        chart = (
             Bar()
             .add_xaxis(words)
             .add_yaxis("词频", counts)
             .set_global_opts(
-                title_opts=opts.TitleOpts(title="词频排名柱状图", subtitle="前20词汇"),
-                xaxis_opts=opts.AxisOpts(axislabel_opts=opts.LabelOpts(rotate=-45))  # X轴标签旋转，避免重叠
+                title_opts=opts.TitleOpts(title="词频Top20 - 柱状图"),
+                xaxis_opts=opts.AxisOpts(axislabel_opts=opts.LabelOpts(rotate=-45)),
+                legend_opts=opts.LegendOpts(is_show=False)
             )
         )
-        return bar
-    
-    elif chart_type == "词频折线图":
-        # 折线图
-        line = (
+    elif chart_type == "折线图":
+        chart = (
             Line()
             .add_xaxis(words)
-            .add_yaxis("词频", counts)
+            .add_yaxis("词频", counts, markpoint_opts=opts.MarkPointOpts(data=[opts.MarkPointItem(type_="max")]))
             .set_global_opts(
-                title_opts=opts.TitleOpts(title="词频排名折线图", subtitle="前20词汇"),
-                xaxis_opts=opts.AxisOpts(axislabel_opts=opts.LabelOpts(rotate=-45))
+                title_opts=opts.TitleOpts(title="词频Top20 - 折线图"),
+                xaxis_opts=opts.AxisOpts(axislabel_opts=opts.LabelOpts(rotate=-45)),
+                legend_opts=opts.LegendOpts(is_show=False)
             )
         )
-        return line
-    
-    elif chart_type == "词频饼图":
-        # 饼图
-        pie = (
+    elif chart_type == "词云":
+        chart = (
+            WordCloud()
+            .add("", list(zip(words, counts)), word_size_range=[20, 100])
+            .set_global_opts(title_opts=opts.TitleOpts(title="词频Top20 - 词云"))
+        )
+    elif chart_type == "饼图":
+        chart = (
             Pie()
             .add("", list(zip(words, counts)))
-            .set_global_opts(title_opts=opts.TitleOpts(title="词频占比饼图", subtitle="前20词汇"))
-            .set_series_opts(label_opts=opts.LabelOpts(formatter="{b}: {c}"))
-        )
-        return pie
-    
-    elif chart_type == "词频环形图":
-        # 环形图（饼图的变种）
-        ring = (
-            Pie()
-            .add("", list(zip(words, counts)), radius=["40%", "70%"])  # 内环40%，外环70%
-            .set_global_opts(title_opts=opts.TitleOpts(title="词频占比环形图", subtitle="前20词汇"))
-            .set_series_opts(label_opts=opts.LabelOpts(formatter="{b}: {c}"))
-        )
-        return ring
-    
-    elif chart_type == "词频雷达图":
-        # 雷达图（适配前8个词汇，避免坐标轴过多）
-        radar_words = words[:8]
-        radar_counts = counts[:8]
-        radar = (
-            Radar()
-            .add_schema(schema=[opts.RadarIndicatorItem(name=w, max_=max(radar_counts)) for w in radar_words])
-            .add("词频", [radar_counts])
-            .set_global_opts(title_opts=opts.TitleOpts(title="词频雷达图", subtitle="前8词汇"))
-        )
-        return radar
-    
-    elif chart_type == "词频散点图":
-        # 散点图
-        scatter = (
-            Scatter()
-            .add_xaxis(words)
-            .add_yaxis("词频", counts)
             .set_global_opts(
-                title_opts=opts.TitleOpts(title="词频散点图", subtitle="前20词汇"),
-                xaxis_opts=opts.AxisOpts(axislabel_opts=opts.LabelOpts(rotate=-45))
+                title_opts=opts.TitleOpts(title="词频Top20 - 饼图"),
+                legend_opts=opts.LegendOpts(orient="vertical", pos_top="15%", pos_left="2%")
             )
+            .set_series_opts(label_opts=opts.LabelOpts(formatter="{b}: {c}"))
         )
-        return scatter
-    
-    elif chart_type == "词频条形图":
-        # 条形图（柱状图的横向版）
-        bar_h = (
+    else:  # 默认柱状图
+        chart = (
             Bar()
             .add_xaxis(words)
             .add_yaxis("词频", counts)
-            .reversal_axis()  # 反转坐标轴，变为横向
-            .set_global_opts(title_opts=opts.TitleOpts(title="词频排名条形图", subtitle="前20词汇"))
+            .set_global_opts(
+                title_opts=opts.TitleOpts(title="词频Top20 - 柱状图"),
+                xaxis_opts=opts.AxisOpts(axislabel_opts=opts.LabelOpts(rotate=-45)),
+                legend_opts=opts.LegendOpts(is_show=False)
+            )
         )
-        return bar_h
-    
-    elif chart_type == "词频3D柱状图":
-        # 3D柱状图（第8种，超额满足≥7种要求）
-        bar3d = (
-            Bar3D()
-            .add("", [[i, 0, counts[i]] for i in range(len(words))], xaxis3d_opts=opts.Axis3DOpts(words), yaxis3d_opts=opts.Axis3DOpts(["词频"]))
-            .set_global_opts(title_opts=opts.TitleOpts(title="词频3D柱状图", subtitle="前20词汇"))
-        )
-        return bar3d
+    return chart
 
-# -------------------------- 主程序逻辑 --------------------------
+# -------------------------- 主程序 --------------------------
 def main():
-    # 侧边栏：图表筛选 + 低频词过滤
-    st.sidebar.title("⚙️ 分析配置")
+    # 侧边栏设置
+    st.sidebar.title("⚙️ 配置选项")
     chart_type = st.sidebar.selectbox(
-        "📊 选择图表类型",
-        [
-            "词云", "词频柱状图", "词频折线图", "词频饼图", 
-            "词频环形图", "词频雷达图", "词频散点图", "词频条形图", "词频3D柱状图"
-        ],
-        index=0  # 默认选词云
+        "📊 选择可视化图表类型",
+        ["柱状图", "折线图", "词云", "饼图"],
+        index=0
     )
     min_freq = st.sidebar.number_input(
         "🔍 低频词过滤阈值（最小词频）",
@@ -212,7 +155,7 @@ def main():
 
     # 主页面：URL输入 + 分析
     st.title("📝 URL文本词频分析工具")
-    st.divider()  # 分隔线
+    st.divider()
     url = st.text_input(
         "请输入文章URL",
         placeholder="例如：https://www.xxx.com/article.html",
@@ -226,14 +169,14 @@ def main():
             return
         
         # 1. 抓取URL文本
-        st.info("正在抓取URL文本...")
-        raw_text = crawl_url_text(url)
+        with st.spinner("正在抓取URL文本..."):
+            raw_text = crawl_url_text(url)
         if not raw_text:
             return
         
         # 2. 清洗分词
-        st.info("正在清洗并分词...")
-        valid_words = clean_and_cut_text(raw_text)
+        with st.spinner("正在清洗并分词..."):
+            valid_words = clean_and_cut_text(raw_text)
         if not valid_words:
             st.error("分词后无有效词汇（可能全是停用词/单字）！")
             return
@@ -248,17 +191,16 @@ def main():
         # 4. 取前20词频
         top20_words = sorted(filtered_words.items(), key=lambda x: x[1], reverse=True)[:20]
         
-        # -------------------------- 最终适配版：仅保留低版本支持的参数 --------------------------
-        # 展示提取并清洗后的完整文本（不限制字数，支持滚动）
+        # 展示提取并清洗后的完整文本
         st.subheader("📜 提取并清洗后的完整文本")
         st.text_area(
             label="完整文本内容",
             value=raw_text,
-            height=300,  # 仅保留高度和只读，无任何宽度参数
+            height=300,
             disabled=True
         )
         
-        # 展示分词后的完整有效词汇（转成字符串，方便查看）
+        # 展示分词后的完整有效词汇
         st.subheader("✂️ 分词后的完整有效词汇")
         segmented_full_text = " ".join(valid_words)
         st.text_area(
@@ -267,15 +209,14 @@ def main():
             height=300,
             disabled=True
         )
-        # -------------------------- 适配结束 --------------------------
         
-        # 5. 展示前20词频（移除width参数，避免报错）
+        # 展示前20词频（用Streamlit内置表格，无需pandas）
         st.subheader("🏆 词频排名前20词汇")
-        import pandas as pd
-        df_top20 = pd.DataFrame(top20_words, columns=["词汇", "词频"])
-        st.dataframe(df_top20)  # 无宽度参数，默认展示
+        # 转换为列表格式，Streamlit可直接展示
+        top20_list = [[word, cnt] for word, cnt in top20_words]
+        st.dataframe(top20_list, column_config={"0": "词汇", "1": "词频"})
         
-        # 6. 生成并展示图表
+        # 5. 生成并展示图表
         st.subheader("📈 可视化图表")
         chart = generate_chart(chart_type, top20_words)
         st_pyecharts(chart, width="100%")

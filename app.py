@@ -83,9 +83,15 @@ def generate_chart(chart_type, top20_words):
     counts = [item[1] for item in top20_words]
     
     from pyecharts import options as opts
-    from pyecharts.charts import Bar, Line, WordCloud, Pie
+    from pyecharts.charts import Bar, Line, WordCloud, Pie, Radar, Scatter
     
-    if chart_type == "柱状图":
+    if chart_type == "词云":
+        chart = (
+            WordCloud()
+            .add("", list(zip(words, counts)), word_size_range=[20, 100])
+            .set_global_opts(title_opts=opts.TitleOpts(title="词频Top20 - 词云"))
+        )
+    elif chart_type == "词频柱状图":
         chart = (
             Bar()
             .add_xaxis(words)
@@ -96,7 +102,7 @@ def generate_chart(chart_type, top20_words):
                 legend_opts=opts.LegendOpts(is_show=False)
             )
         )
-    elif chart_type == "折线图":
+    elif chart_type == "词频折线图":
         chart = (
             Line()
             .add_xaxis(words)
@@ -107,13 +113,7 @@ def generate_chart(chart_type, top20_words):
                 legend_opts=opts.LegendOpts(is_show=False)
             )
         )
-    elif chart_type == "词云":
-        chart = (
-            WordCloud()
-            .add("", list(zip(words, counts)), word_size_range=[20, 100])
-            .set_global_opts(title_opts=opts.TitleOpts(title="词频Top20 - 词云"))
-        )
-    elif chart_type == "饼图":
+    elif chart_type == "词频饼图":
         chart = (
             Pie()
             .add("", list(zip(words, counts)))
@@ -123,16 +123,58 @@ def generate_chart(chart_type, top20_words):
             )
             .set_series_opts(label_opts=opts.LabelOpts(formatter="{b}: {c}"))
         )
-    else:  # 默认柱状图
+    elif chart_type == "词频环形图":
+        chart = (
+            Pie()
+            .add("", list(zip(words, counts)) , radius=["40%", "70%"])
+            .set_global_opts(
+                title_opts=opts.TitleOpts(title="词频Top20 - 环形图"),
+                legend_opts=opts.LegendOpts(orient="vertical", pos_top="15%", pos_left="2%")
+            )
+            .set_series_opts(label_opts=opts.LabelOpts(formatter="{b}: {c}"))
+        )
+    elif chart_type == "词频雷达图":
+        # 雷达图需要构造维度数据
+        radar_data = [{"name": words[i], "value": [counts[i]]} for i in range(len(words))]
+        schema = [{"name": "词频", "max": max(counts), "min": min(counts)}]
+        
+        chart = (
+            Radar()
+            .add_schema(schema)
+            .add("词频", radar_data)
+            .set_global_opts(
+                title_opts=opts.TitleOpts(title="词频Top20 - 雷达图"),
+                legend_opts=opts.LegendOpts(is_show=False)
+            )
+        )
+    elif chart_type == "词频散点图":
+        chart = (
+            Scatter()
+            .add_xaxis(words)
+            .add_yaxis("词频", counts)
+            .set_global_opts(
+                title_opts=opts.TitleOpts(title="词频Top20 - 散点图"),
+                xaxis_opts=opts.AxisOpts(axislabel_opts=opts.LabelOpts(rotate=-45)),
+                yaxis_opts=opts.AxisOpts(min_=0),
+                legend_opts=opts.LegendOpts(is_show=False)
+            )
+        )
+    elif chart_type == "词频条形图":
         chart = (
             Bar()
             .add_xaxis(words)
             .add_yaxis("词频", counts)
+            .reversal_axis()  # 反转坐标轴实现条形图
             .set_global_opts(
-                title_opts=opts.TitleOpts(title="词频Top20 - 柱状图"),
-                xaxis_opts=opts.AxisOpts(axislabel_opts=opts.LabelOpts(rotate=-45)),
+                title_opts=opts.TitleOpts(title="词频Top20 - 条形图"),
                 legend_opts=opts.LegendOpts(is_show=False)
             )
+        )
+    else:  # 默认词云
+        chart = (
+            WordCloud()
+            .add("", list(zip(words, counts)), word_size_range=[20, 100])
+            .set_global_opts(title_opts=opts.TitleOpts(title="词频Top20 - 词云"))
         )
     return chart
 
@@ -142,7 +184,7 @@ def main():
     st.sidebar.title("⚙️ 配置选项")
     chart_type = st.sidebar.selectbox(
         "📊 选择可视化图表类型",
-        ["柱状图", "折线图", "词云", "饼图"],
+        ["词云", "词频柱状图", "词频折线图", "词频饼图", "词频环形图", "词频雷达图", "词频散点图", "词频条形图"],
         index=0
     )
     min_freq = st.sidebar.number_input(

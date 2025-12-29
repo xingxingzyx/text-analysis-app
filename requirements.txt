@@ -1,13 +1,12 @@
-# 基础Web框架（适配Python3.8+，兼容3.13）
+# 基础Web框架（适配学校机房的Python3.8+）
 streamlit==1.38.0
-# HTTP请求库（稳定兼容）
+# HTTP请求库
 requests==2.32.3
-# HTML解析库（经典稳定版）
+# HTML解析库
 beautifulsoup4==4.12.3
-# 中文分词库（纯Python，无需编译）
+# 中文分词库
 jieba==0.42.1
-# 数据可视化（pyecharts核心）
+# 数据可视化
 pyecharts==2.0.3
 # streamlit集成pyecharts
 streamlit-echarts==0.4.0
-# 移除 pandas 和 pyarrow！
